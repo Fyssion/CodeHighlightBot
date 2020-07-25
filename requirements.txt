@@ -1,0 +1,5 @@
+python-telegram-bot
+git+https://github.com/Fyssion/telegram-ext-commands
+pillow
+pygments
+guesslang
