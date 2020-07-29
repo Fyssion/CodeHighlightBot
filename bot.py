@@ -6,9 +6,10 @@ import logging
 import guesslang
 import html
 from pygments import highlight
-from pygments.lexers import get_lexer_by_name, ClassNotFound
+from pygments.lexers import get_lexer_by_name, guess_lexer, ClassNotFound
 from pygments.formatters.img import ImageFormatter
 from pygments.styles.paraiso_dark import ParaisoDarkStyle
+from styles.dracula import DraculaStyle
 
 import config
 
@@ -117,25 +118,35 @@ def code(ctx, *, body):
     """
     words = body.split()
     first_word = words[0]
+    detected = False
 
     # Attempt to get the language of the code
     try:
         lexer = get_lexer_by_name(first_word, stripall=True)
-        language = None
+        language = lexer.name
         body = body[len(first_word) :]
     except ClassNotFound:
         language = guesser.language_name(body)
         try:
             lexer = get_lexer_by_name(language, stripall=True)
+            detected = True
         except ClassNotFound:
-            ctx.send("Sorry, could not detect language.")
-            return
+            try:
+                lexter = get_lexer_by_name(body)
+                language = lexer.name
+                detected = True
+            except ClassNotFound:
+                ctx.send("Sorry, could not detect language.")
+                return
 
     formatter = ImageFormatter(
         image_format="PNG",
         font_size=24,
-        style=ParaisoDarkStyle,
-        line_number_bg=0x261825,
+        line_pad=8,
+        style=DraculaStyle,
+        line_number_bg="#282a36",
+        line_number_fg="#69696E",
+        line_number_pad=12,
         font_name="Consolas",
     )
 
@@ -144,11 +155,11 @@ def code(ctx, *, body):
 
     file.seek(0)
 
-    if language:
+    if detected:
         ctx.send(f"Detected language: {language}", photo=file)
 
     else:
-        ctx.send(photo=file)
+        ctx.send(f"Language: {language}", photo=file)
 
 
 bot.run()
