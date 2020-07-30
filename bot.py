@@ -1,95 +1,27 @@
-from telegram.ext import commands, MessageHandler, Filters
+from telegram.ext import (
+    commands,
+    CallbackQueryHandler,
+    ConversationHandler,
+    MessageHandler,
+    Filters,
+)
 import telegram
 
-import io
+from collections import deque
+import datetime
 import logging
 import guesslang
-import html
-from pygments import highlight
 from pygments.lexers import get_lexer_by_name, guess_lexer, ClassNotFound
-from pygments.formatters.img import ImageFormatter
-from pygments.styles.paraiso_dark import ParaisoDarkStyle
-from styles.dracula import DraculaStyle
 
 import config
+from utils.bot import Bot
+from utils.code import Code
+from utils.utils import generate_image, build_menu
 
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
-
-
-class Bot(commands.Bot):
-    """Subclass that connects to a db on start and close"""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.db = None
-
-    def remove_mentions(self, string):
-        string = list(string)
-
-        for i, letter in enumerate(string):
-            if letter == "@":
-                string[i] = "@\N{ZERO WIDTH JOINER}"
-
-        return "".join(string)
-
-    def get_command_signature(self, command):
-        alias = command.name
-        return "/%s %s" % (alias, command.signature)
-
-    def format_command(self, command):
-        help_text = []
-
-        signature = self.get_command_signature(command)
-        help_text.append(html.escape(f"Usage: {signature}"))
-
-        if command.description:
-            help_text.append(html.escape(command.description))
-
-        if command.help:
-            help_text.append(html.escape(command.help))
-
-        if command.examples:
-            help_text.append("")  # blank line
-            help_text.append("<b>Examples:</b>")
-
-            for example in command.examples:
-                help_text.append(html.escape(f"• /{command.name} {example}"))
-
-        return "\n".join(help_text)
-
-    def on_command_error(self, ctx, error):
-        # print("Ignoring exception in command {}:".format(ctx.command), file=sys.stderr)
-        # traceback.print_exception(
-        #     type(error), error, error.__traceback__, file=sys.stderr
-        # )
-
-        cmd = self.format_command(ctx.command)
-
-        if hasattr(ctx, "handled"):
-            return
-
-        elif isinstance(error, commands.ArgumentParsingError):
-            ctx.send(f"\N{CROSS MARK} {error}")
-
-        elif isinstance(error, commands.BadArgument):
-            formatted = self.remove_mentions(str(error))
-            ctx.send(f"\N{CROSS MARK} {html.escape(formatted)}\n\n{cmd}", parse_mode="HTML")
-
-        elif isinstance(error, commands.MissingRequiredArgument):
-            message = f"Missing a required argument: <code>{html.escape(error.param.name)}</code>"
-            ctx.send(ctx.send(f"\N{CROSS MARK} {message}\n\n{cmd}", parse_mode="HTML"))
-
-        elif isinstance(error, commands.CommandInvokeError):
-            message = (
-                "\N{WARNING SIGN} <b>Unexpected Error</b>\n\n"
-                "An unexpected error has occured:"
-                f'<pre><code class="language-python">\n{html.escape(str(error))}</code></pre>'
-                "The owner of the bot has been notified."
-            )
-            ctx.send(message, parse_mode="HTML")
 
 
 description = """
@@ -100,6 +32,95 @@ You can optionally specify a language before the code.
 """
 
 bot = Bot(token=config.token, description=description, owner_ids=[1389169565])
+
+bot.code_cache = deque(maxlen=500)
+# chat_id: Code
+bot.ongoing_changes = {}
+
+LANGUAGE = 0
+
+
+# Creating a predefined button list
+buttons = [
+    telegram.InlineKeyboardButton("Change Language", callback_data="change_lang")
+]
+change_lang_markup = telegram.InlineKeyboardMarkup(build_menu(buttons, n_cols=1))
+
+
+# Adding the callback query handler for the "Change Language" button
+def button(update, context):
+    query = update.callback_query
+
+    if update.effective_chat.id in bot.ongoing_changes:
+        query.answer(
+            "You can only change once language at once.", show_alert=True
+        )
+        return ConversationHandler.END
+
+    if update.effective_chat.type != "private":
+        query.answer(
+            "Sorry, that option is unavailable for this message.", show_alert=True
+        )
+        return ConversationHandler.END
+
+    code = None
+
+    for _code in bot.code_cache:
+        if _code.message_id == update.effective_message.message_id:
+            code = _code
+
+    if not code:
+        query.answer(
+            "Sorry, that option is no longer available for this message.",
+            show_alert=True,
+        )
+        return ConversationHandler.END
+
+    query.answer()
+    update.effective_message.reply_text("Please enter a new language")
+
+    bot.ongoing_changes[update.effective_chat.id] = code
+
+    return LANGUAGE
+
+
+def change_language(update, context):
+    code = bot.ongoing_changes.pop(update.effective_chat.id)
+
+    if not code:
+        update.message.reply_text("Sorry, an unexpected error occured.")
+        return ConversationHandler.END
+
+    text = update.message.text
+
+    try:
+        lexer = get_lexer_by_name(text, stripall=True)
+        language = lexer.name
+    except ClassNotFound:
+        update.message.reply_text("Unrecognized language. Sorry.")
+        return ConversationHandler.END
+
+    file = generate_image(code.code, lexer)
+
+    update.message.reply_photo(
+        photo=file, caption=f"Language: {language}", reply_markup=change_lang_markup
+    )
+
+    code.language = language
+    bot.code_cache.append(code)
+
+    return ConversationHandler.END
+
+
+callback_query_handler = CallbackQueryHandler(button)
+conv_handler = ConversationHandler(
+    entry_points=[callback_query_handler],
+    states={LANGUAGE: [MessageHandler(Filters.text, change_language)],},
+    fallbacks=[],
+)
+
+bot.dispatcher.add_handler(conv_handler)
+
 
 guesser = guesslang.Guess()
 
@@ -132,34 +153,31 @@ def code(ctx, *, body):
             detected = True
         except ClassNotFound:
             try:
-                lexter = get_lexer_by_name(body)
+                lexer = guess_lexer(body)
                 language = lexer.name
                 detected = True
             except ClassNotFound:
                 ctx.send("Sorry, could not detect language.")
                 return
 
-    formatter = ImageFormatter(
-        image_format="PNG",
-        font_size=24,
-        line_pad=8,
-        style=DraculaStyle,
-        line_number_bg="#282a36",
-        line_number_fg="#69696E",
-        line_number_pad=12,
-        font_name="Consolas",
-    )
+    file = generate_image(body, lexer)
 
-    file = io.BytesIO()
-    result = highlight(body, lexer, formatter, outfile=file)
-
-    file.seek(0)
-
-    if detected:
-        ctx.send(f"Detected language: {language}", photo=file)
+    if ctx.chat.type == "private":
+        reply_markup = change_lang_markup
 
     else:
-        ctx.send(f"Language: {language}", photo=file)
+        reply_markup = None
+
+    if detected:
+        message = ctx.send(
+            f"Detected language: {language}", photo=file, reply_markup=reply_markup,
+        )
+
+    else:
+        message = ctx.send(f"Language: {language}", photo=file, reply_markup=reply_markup)
+
+    code = Code(body, language, message.message_id, ctx.chat.id, ctx.user.id)
+    bot.code_cache.append(code)
 
 
 bot.run()
