@@ -10,7 +10,6 @@ import telegram
 from collections import deque
 import datetime
 import logging
-import guesslang
 from pygments.lexers import get_lexer_by_name, guess_lexer, ClassNotFound
 
 import config
@@ -100,7 +99,7 @@ def change_language(update, context):
         update.message.reply_text("Unrecognized language. Sorry.")
         return ConversationHandler.END
 
-    file = generate_image(code.code, lexer)
+    file = generate_image(code.code, lexer, font=config.font)
 
     update.message.reply_photo(
         photo=file, caption=f"Language: {language}", reply_markup=change_lang_markup
@@ -120,9 +119,6 @@ conv_handler = ConversationHandler(
 )
 
 bot.dispatcher.add_handler(conv_handler)
-
-
-guesser = guesslang.Guess()
 
 
 @bot.command(
@@ -147,20 +143,15 @@ def code(ctx, *, body):
         language = lexer.name
         body = body[len(first_word) :]
     except ClassNotFound:
-        language = guesser.language_name(body)
         try:
-            lexer = get_lexer_by_name(language, stripall=True)
+            lexer = guess_lexer(body)
+            language = lexer.name
             detected = True
         except ClassNotFound:
-            try:
-                lexer = guess_lexer(body)
-                language = lexer.name
-                detected = True
-            except ClassNotFound:
-                ctx.send("Sorry, could not detect language.")
-                return
+            ctx.send("Sorry, could not detect language.")
+            return
 
-    file = generate_image(body, lexer)
+    file = generate_image(body, lexer, font=config.font)
 
     if ctx.chat.type == "private":
         reply_markup = change_lang_markup

@@ -5,7 +5,7 @@ from pygments.formatters.img import ImageFormatter
 from styles.dracula import DraculaStyle
 
 
-def generate_image(body, lexer):
+def generate_image(body, lexer, *, font="Consolas"):
     """Generates the highlighted image given the code and a lexer"""
     formatter = ImageFormatter(
         image_format="PNG",
@@ -15,7 +15,7 @@ def generate_image(body, lexer):
         line_number_bg="#282a36",
         line_number_fg="#69696E",
         line_number_pad=12,
-        font_name="Consolas",
+        font_name=font,
     )
 
     file = io.BytesIO()
