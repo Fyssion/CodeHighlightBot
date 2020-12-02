@@ -17,10 +17,10 @@ from utils.bot import Bot
 from utils.code import Code
 from utils.utils import generate_image, build_menu
 
+logging.basicConfig(format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", level=logging.INFO)
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
+log = logging.getLogger("bot")
+log.setLevel(logging.INFO)
 
 
 description = """
@@ -30,6 +30,7 @@ Just use /code with some code, and I'll try to detect a language and highlight i
 You can optionally specify a language before the code.
 """
 
+log.info("Starting bot...")
 bot = Bot(token=config.token, description=description, owner_ids=[1389169565])
 
 bot.code_cache = deque(maxlen=500)
@@ -108,6 +109,9 @@ def change_language(update, context):
     code.language = language
     bot.code_cache.append(code)
 
+    user = update.effective_user.username or update.effective_user.first_name
+    log.info(f"Generated code image for {user} (ID: {update.effective_user.id}) (from change button)")
+
     return ConversationHandler.END
 
 
@@ -170,5 +174,10 @@ def code(ctx, *, body):
     code = Code(body, language, message.message_id, ctx.chat.id, ctx.user.id)
     bot.code_cache.append(code)
 
+    user = ctx.user.username or ctx.user.first_name
+    log.info(f"Generated code image for {user} (ID: {ctx.user.id}) (from command)")
 
-bot.run()
+
+if __name__ == "__main__":
+    log.info("Starting polling...")
+    bot.run()
